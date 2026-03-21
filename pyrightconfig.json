@@ -1,0 +1,20 @@
+{
+  "venvPath": ".",
+  "venv": "venv",
+  "pythonVersion": "3.11",
+  "pythonPlatform": "Windows",
+  "include": [
+    "trinetra_ml",
+    "trinetra_backend"
+  ],
+  "exclude": [
+    "venv",
+    "trinetra_frontend",
+    "**/__pycache__"
+  ],
+  "reportMissingImports": "warning",
+  "reportMissingModuleSource": "none",
+  "reportOperatorIssue": "none",
+  "reportIndexIssue": "none",
+  "typeCheckingMode": "basic"
+}
