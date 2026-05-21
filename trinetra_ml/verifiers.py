@@ -1,5 +1,5 @@
 """
-Trinetra Multi-Source Verifiers v2.0
+Trinetra Multi-Source Verifiers v2.1
 Parallel verification: Domain Reputation, HuggingFace, Google Fact Check,
 NewsAPI, and AI-content detection.
 Each verifier returns a dict with a *_score (0-100) and metadata.
@@ -13,7 +13,9 @@ import httpx
 from dotenv import load_dotenv
 import os
 
-load_dotenv(override=True)
+# Always load from the trinetra_ml/.env — regardless of uvicorn working directory
+_ENV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
+load_dotenv(dotenv_path=_ENV_PATH, override=True)
 
 logger = logging.getLogger(__name__)
 
@@ -375,69 +377,99 @@ def _parse_google_fc_claims(claims: list) -> tuple[list, int, int]:
     return parsed, pos, neg
 
 
-async def _claimbuster_fallback(query: str) -> dict:
-    """Free ClaimBuster API — no key required, returns claim worthiness scores.
-
-    ClaimBuster scores sentences on how check-worthy they are (0-1).
-    We use the sentence-level endpoint which is public and key-free.
+async def _gemini_factcheck_fallback(text: str) -> dict:
     """
+    Gemini-powered fact-check fallback.
+    Used when Google Fact Check API is unavailable (key not enabled / offline).
+    Asks Gemini to identify specific verifiable claims and rate their accuracy.
+    """
+    import google.generativeai as genai
+    gemini_key = os.getenv('GEMINI_API_KEY', '')
+    if not gemini_key:
+        return {
+            'fact_checks': [], 'fact_check_score': 50,
+            'fact_check_available': False,
+            'fact_check_error': 'No Gemini key for fallback fact-check',
+            'fact_check_count': 0,
+        }
     try:
-        # Score the first sentence of the query
-        sentence = query[:300]
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.get(
-                'https://idir.uta.edu/claimbuster/api/v2/score/text/sentences/',
-                params={'input_text': sentence},
-                headers={'x-api-key': 'none'},  # public endpoint
-            )
-        if not resp.is_success:
-            return {'fact_checks': [], 'fact_check_score': 50,
-                    'fact_check_available': False,
-                    'fact_check_error': 'ClaimBuster also unavailable',
-                    'fact_check_count': 0}
+        genai.configure(api_key=gemini_key)
+        model = genai.GenerativeModel('gemini-2.0-flash-lite')
+        prompt = f"""Extract up to 3 specific verifiable factual claims from the text below, and rate each as TRUE, FALSE, or UNCERTAIN based on your knowledge.
 
-        data = resp.json()
-        results = data.get('results', [])
-        if not results:
-            return {'fact_checks': [], 'fact_check_score': 50,
-                    'fact_check_available': True, 'fact_check_count': 0}
+Text: \"\"\"{text[:800]}\"\"\"
 
-        # Average check-worthiness score; high score = claim-dense (more scrutiny needed)
-        avg_score = sum(r.get('score', 0) for r in results) / len(results)
-        # Convert: low check-worthiness → more likely routine/real news (higher trust)
-        trust = max(20, min(80, round((1 - avg_score) * 75 + 25)))
+Respond ONLY with valid JSON:
+{{"claims": [{{
+  "text": "<exact claim>",
+  "rating": "<TRUE|FALSE|UNCERTAIN>",
+  "explanation": "<one sentence why>"
+}}]}}"""
+        import asyncio
+        response = await asyncio.wait_for(
+            asyncio.get_event_loop().run_in_executor(
+                None, lambda: model.generate_content(prompt)
+            ),
+            timeout=20,
+        )
+        import json, re
+        raw = response.text.strip()
+        if raw.startswith('```'):
+            raw = re.sub(r'^```[a-z]*\n?', '', raw)
+            raw = re.sub(r'\n?```$', '', raw)
+        data = json.loads(raw)
+        claims_raw = data.get('claims', [])
+        if not claims_raw:
+            return {'fact_checks': [], 'fact_check_score': 50,
+                    'fact_check_available': True, 'fact_check_count': 0,
+                    'fact_check_source': 'Gemini AI Fallback'}
+
+        pos = sum(1 for c in claims_raw if c.get('rating') == 'TRUE')
+        neg = sum(1 for c in claims_raw if c.get('rating') == 'FALSE')
+        total = pos + neg
+        if total == 0:
+            fact_score = 50
+        else:
+            fact_score = int(round(15 + (pos / total) * 75))
 
         parsed = [{
-            'text':      r.get('text', '')[:200],
+            'text':      c.get('text', '')[:200],
             'claimant':  'Content',
-            'rating':    f'Check-worthiness: {round(r.get("score", 0) * 100)}%',
-            'publisher': 'ClaimBuster (UTA)',
-            'url':       'https://idir.uta.edu/claimbuster/',
-            'is_true':   avg_score < 0.4,
-            'is_false':  avg_score > 0.75,
-            'source':    'ClaimBuster',
-        } for r in results[:3]]
+            'rating':    c.get('rating', 'UNCERTAIN'),
+            'publisher': 'Gemini AI',
+            'url':       '',
+            'is_true':   c.get('rating') == 'TRUE',
+            'is_false':  c.get('rating') == 'FALSE',
+            'source':    'Gemini Fact-Check',
+        } for c in claims_raw[:3]]
 
         return {
-            'fact_checks':            parsed,
-            'fact_check_score':       trust,
-            'fact_check_available':   True,
-            'fact_check_count':       len(parsed),
-            'fact_check_source':      'ClaimBuster (fallback)',
+            'fact_checks':          parsed,
+            'fact_check_score':     fact_score,
+            'fact_check_available': True,
+            'fact_check_count':     len(parsed),
+            'fact_check_source':    'Gemini AI (fallback)',
         }
     except Exception as e:
-        logger.error(f'ClaimBuster fallback error: {e}')
-        return {'fact_checks': [], 'fact_check_score': 50,
-                'fact_check_available': False,
-                'fact_check_error': f'ClaimBuster: {str(e)}',
-                'fact_check_count': 0}
+        logger.error(f'Gemini fact-check fallback error: {e}')
+        return {
+            'fact_checks': [], 'fact_check_score': 50,
+            'fact_check_available': False,
+            'fact_check_error': f'Gemini fallback: {str(e)[:120]}',
+            'fact_check_count': 0,
+        }
 
 
 async def check_google_fact_check(text: str) -> dict:
     """Search Google ClaimSearch for fact-checked claims matching the content.
 
-    Falls back to ClaimBuster (free, no key) if the Google Fact Check
-    Tools API is not enabled (403) or the key is not configured.
+    Falls back to Gemini AI fact-check if the Google Fact Check
+    Tools API is not enabled (400/403) or the key is not configured.
+
+    NOTE: To enable the Google Fact Check Tools API:
+    1. Go to: console.cloud.google.com/apis/library/factchecktools.googleapis.com
+    2. Enable it for your GCP project
+    3. Generate a new API key or restrict the existing one to this API
     """
     query = _extract_query(text)
 
@@ -456,17 +488,19 @@ async def check_google_fact_check(text: str) -> dict:
                     params=params,
                 )
 
-            if resp.status_code == 403:
+            # Any 4xx from Google → key is invalid or API not enabled
+            if resp.status_code in (400, 403):
+                err_body = ''
+                try:
+                    err_body = resp.json().get('error', {}).get('reason', resp.text[:80])
+                except Exception:
+                    err_body = resp.text[:80]
                 logger.warning(
-                    'Google Fact Check API 403 — API not enabled for this key. '
+                    f'Google Fact Check API {resp.status_code} ({err_body}). '
                     'Enable at: console.cloud.google.com/apis/library/factchecktools.googleapis.com '
-                    '— falling back to ClaimBuster.'
+                    '— using Gemini fallback.'
                 )
-                return await _claimbuster_fallback(query)
-
-            if resp.status_code == 400:
-                logger.warning('Google Fact Check 400 — falling back to ClaimBuster')
-                return await _claimbuster_fallback(query)
+                return await _gemini_factcheck_fallback(text)
 
             resp.raise_for_status()
             data   = resp.json()
@@ -476,7 +510,7 @@ async def check_google_fact_check(text: str) -> dict:
                 return {
                     'fact_checks':          [],
                     'fact_check_score':     50,
-                    'fact_check_available': True,   # API worked — just no matching claims
+                    'fact_check_available': True,
                     'fact_check_count':     0,
                     'fact_check_source':    'Google Fact Check',
                 }
@@ -484,14 +518,10 @@ async def check_google_fact_check(text: str) -> dict:
             parsed, pos, neg = _parse_google_fc_claims(claims)
             total = pos + neg
             if total == 0:
-                # Claims found but none clearly true/false — neutral
                 fact_score = 50
             else:
-                # pos = verified true claims, neg = debunked/false claims
-                # If article text matches debunked claims → lower trust
-                # If text matches verified claims → higher trust
-                ratio = pos / total   # 0.0 (all false) → 1.0 (all true)
-                fact_score = int(round(15 + ratio * 75))  # range: 15–90
+                ratio = pos / total
+                fact_score = int(round(15 + ratio * 75))
             return {
                 'fact_checks':          parsed,
                 'fact_check_score':     fact_score,
@@ -501,11 +531,10 @@ async def check_google_fact_check(text: str) -> dict:
             }
 
         except Exception as e:
-            logger.error(f'Google Fact Check exception: {e} — falling back to ClaimBuster')
-            # Fall through to ClaimBuster
+            logger.error(f'Google Fact Check exception: {e} — using Gemini fallback')
 
-    # ── Fallback: ClaimBuster (free, no API key required) ─────────────
-    return await _claimbuster_fallback(query)
+    # ── Fallback: Gemini AI fact-check ────────────────────────────────
+    return await _gemini_factcheck_fallback(text)
 
 
 # ─────────────────────────────────────────────

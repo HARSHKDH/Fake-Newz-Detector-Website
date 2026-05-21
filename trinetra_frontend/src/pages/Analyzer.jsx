@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { Scan, Link2, FileText, Loader2, AlertCircle, Sparkles, Info } from 'lucide-react'
+import { Scan, Link2, FileText, Loader2, AlertCircle, Sparkles, Info, Camera, ArrowRight } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import { mlApi, api } from '../api'
 import TrustScoreCard from '../components/TrustScoreCard'
 
@@ -85,7 +86,7 @@ export default function Analyzer() {
       <div className="flex gap-2 p-1 bg-slate-100 rounded-xl mb-6 w-fit mx-auto">
         {[
           { id: 'text', label: 'Paste Text', icon: FileText },
-          { id: 'url', label: 'Enter URL', icon: Link2 },
+          { id: 'url',  label: 'Enter URL',  icon: Link2    },
         ].map(({ id, label, icon: Icon }) => (
           <button
             key={id}
@@ -99,6 +100,15 @@ export default function Analyzer() {
             {label}
           </button>
         ))}
+        {/* Image tab — links to dedicated image analyzer */}
+        <Link
+          to="/analyze/image"
+          className="flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold text-slate-500 hover:text-slate-700 transition-all duration-200"
+          id="mode-image"
+        >
+          <Camera className="w-4 h-4" />
+          Image / Screenshot
+        </Link>
       </div>
 
       {/* Input Card */}
@@ -185,7 +195,21 @@ export default function Analyzer() {
       )}
 
       {/* Results */}
-      {result && !loading && <TrustScoreCard result={result} />}
+      {result && !loading && (
+        <>
+          <TrustScoreCard result={result} />
+          {/* Analyze Another prompt */}
+          <div className="mt-4 flex items-center justify-center gap-3">
+            <button
+              onClick={handleClear}
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-navy-900 text-white text-sm font-semibold hover:bg-navy-800 transition-all shadow-md"
+              id="analyze-another-btn"
+            >
+              <ArrowRight className="w-4 h-4" /> Analyze Another Article
+            </button>
+          </div>
+        </>
+      )}
     </div>
   )
 }

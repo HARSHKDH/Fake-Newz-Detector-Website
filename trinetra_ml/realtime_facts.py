@@ -32,7 +32,9 @@ import httpx
 from dotenv import load_dotenv
 import os
 
-load_dotenv(override=True)
+# Always load from the trinetra_ml/.env — regardless of uvicorn working directory
+_ENV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
+load_dotenv(dotenv_path=_ENV_PATH, override=True)
 
 logger = logging.getLogger(__name__)
 

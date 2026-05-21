@@ -5,11 +5,12 @@ Google Fact Check, NewsAPI, and Reality Defender.
 """
 from typing import Optional, List
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import os
 import sys
+import base64
 
 # Ensure the parent directory is on sys.path so absolute imports work
 _ML_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -119,4 +120,58 @@ async def analyze(request: AnalyzeRequest):
         raise HTTPException(status_code=422, detail="Provide either 'text' or 'url'.")
 
     result = await analyze_content(text=request.text, url=request.url)
+    return result
+
+
+@app.post("/analyze-image", response_model=AnalyzeResponse)
+async def analyze_image(file: UploadFile = File(...)):
+    """
+    Accept an uploaded image, use Gemini Vision to extract all visible text (OCR),
+    then run the standard analysis pipeline on the extracted text.
+    """
+    import google.generativeai as genai
+    from trinetra_ml.analyzer import GEMINI_API_KEY, analyze_content
+
+    # Basic validation
+    allowed = {'image/jpeg', 'image/png', 'image/webp', 'image/gif'}
+    if file.content_type not in allowed:
+        raise HTTPException(status_code=422, detail="Unsupported file type. Upload a JPG, PNG, WebP or GIF.")
+
+    MAX_BYTES = 8 * 1024 * 1024  # 8 MB
+    image_bytes = await file.read()
+    if len(image_bytes) > MAX_BYTES:
+        raise HTTPException(status_code=413, detail="Image too large. Maximum size is 8 MB.")
+
+    if not GEMINI_API_KEY:
+        raise HTTPException(status_code=503, detail="Gemini API key not configured.")
+
+    # ── Step 1: OCR via Gemini Vision ─────────────────────────────────────────
+    try:
+        genai.configure(api_key=GEMINI_API_KEY)
+        model = genai.GenerativeModel('gemini-2.0-flash')
+        img_b64 = base64.b64encode(image_bytes).decode()
+        ocr_prompt = (
+            "Extract ALL visible text from this image exactly as it appears. "
+            "Include headlines, body text, captions, watermarks, and any other text. "
+            "Output only the raw extracted text without any commentary or formatting."
+        )
+        response = model.generate_content([
+            {"mime_type": file.content_type, "data": img_b64},
+            ocr_prompt,
+        ])
+        extracted_text = response.text.strip() if response.text else ''
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Gemini Vision OCR failed: {str(e)[:200]}")
+
+    if not extracted_text or len(extracted_text) < 10:
+        raise HTTPException(
+            status_code=422,
+            detail="Could not extract readable text from this image. Try a clearer screenshot with visible text."
+        )
+
+    # ── Step 2: Full analysis on the extracted text ────────────────────────────
+    result = await analyze_content(text=extracted_text)
+    # Tag so history knows it came from an image
+    result['input_mode'] = 'image'
+    result['detected_source'] = f'Image: {file.filename or "screenshot"}'
     return result

@@ -5,3 +5,4 @@ httpx
 python-dotenv
 newspaper3k
 lxml[html_clean]
+python-multipart

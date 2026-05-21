@@ -1,8 +1,9 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Shield, CheckCircle2, AlertTriangle, XCircle, HelpCircle,
   TrendingUp, Brain, Newspaper, Search, Bot, Globe,
   ExternalLink, CheckCheck, AlertCircle, Building2, Star, Zap,
+  Share2, Copy, Check,
 } from 'lucide-react'
 
 const VERDICT_CONFIG = {
@@ -101,9 +102,23 @@ function ScoreInterpretation({ score, verdict }) {
 
 export default function TrustScoreCard({ result }) {
   const circleRef = useRef(null)
+  const [copied, setCopied] = useState(false)
   const config  = VERDICT_CONFIG[result.verdict] || VERDICT_CONFIG.UNCERTAIN
   const Icon    = config.icon
   const offset  = CIRC - (result.trust_score / 100) * CIRC
+
+  const handleShare = () => {
+    try {
+      const encoded = encodeURIComponent(btoa(JSON.stringify(result)))
+      const shareUrl = `${window.location.origin}/share?d=${encoded}`
+      navigator.clipboard.writeText(shareUrl)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2500)
+    } catch {
+      // fallback: just copy current page
+      navigator.clipboard.writeText(window.location.href)
+    }
+  }
 
   useEffect(() => {
     if (circleRef.current) {
@@ -123,6 +138,27 @@ export default function TrustScoreCard({ result }) {
 
   return (
     <div className="space-y-5 animate-slide-up">
+
+      {/* ── Share / Action bar ───────────────────────────────────────────── */}
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <p className="text-xs text-slate-400">
+          Analysis by <span className="font-semibold text-slate-600">Trinetra AI</span> · {new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+        </p>
+        <button
+          onClick={handleShare}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all duration-200 shadow-sm ${
+            copied
+              ? 'bg-emerald-500 text-white'
+              : 'bg-white border border-slate-200 text-slate-600 hover:border-trinetra-blue hover:text-trinetra-blue'
+          }`}
+          id="share-result-btn"
+        >
+          {copied
+            ? <><Check className="w-4 h-4" /> Link Copied!</>
+            : <><Share2 className="w-4 h-4" /> Share This Result</>
+          }
+        </button>
+      </div>
 
       {/* ── Known Fake Site Warning Banner ──────────────────────────────── */}
       {result.is_known_fake_site && (

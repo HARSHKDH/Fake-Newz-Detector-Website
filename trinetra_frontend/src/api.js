@@ -20,7 +20,15 @@ api.interceptors.request.use((config) => {
 })
 
 // Silent auth-check endpoints — never redirect on 401 for these
-const SILENT_ENDPOINTS = ['/auth/me/', '/auth/login/', '/auth/register/', '/auth/google/']
+const SILENT_ENDPOINTS = [
+  '/auth/me/',
+  '/auth/login/',
+  '/auth/register/',
+  '/auth/google/',
+  '/auth/forgot-password/',
+  '/auth/verify-otp/',
+  '/auth/reset-password/',
+]
 
 // Auto-refresh token on 401 (but not for auth-check / login endpoints)
 api.interceptors.response.use(

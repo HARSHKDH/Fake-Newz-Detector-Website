@@ -24,7 +24,9 @@ import httpx
 from dotenv import load_dotenv
 import google.generativeai as genai
 
-load_dotenv(override=True)
+# Always load from the trinetra_ml/.env — regardless of uvicorn working directory
+_ENV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
+load_dotenv(dotenv_path=_ENV_PATH, override=True)
 
 logger = logging.getLogger(__name__)
 
@@ -204,8 +206,14 @@ Respond ONLY with valid JSON:
 """
 
 
-_GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.0-flash-lite']
-_MAX_QUOTA_WAIT = 10
+# Model priority: lite first (highest free quota), then flash, then 2.5
+# gemini-2.0-flash-lite: 1500 RPD free  |  gemini-2.0-flash: 200 RPD free
+_GEMINI_MODELS = [
+    'gemini-2.0-flash-lite',
+    'gemini-2.0-flash',
+    'gemini-2.5-flash',
+]
+_MAX_QUOTA_WAIT = 3  # seconds between model retries on 429
 
 
 def _parse_gemini_raw(raw: str) -> dict | None:

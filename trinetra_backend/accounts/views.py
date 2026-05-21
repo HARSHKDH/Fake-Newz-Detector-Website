@@ -146,14 +146,27 @@ class ForgotPasswordView(APIView):
         # Send email
         try:
             send_mail(
-                'Password Reset OTP - Trinetra',
-                f'Your password reset OTP is: {otp_code}\nThis code is valid for 10 minutes.',
-                settings.EMAIL_HOST_USER or 'noreply@trinetra.com',
-                [email],
+                subject='Your Trinetra Password Reset Code',
+                message=f'Your password reset OTP is: {otp_code}\nThis code is valid for 10 minutes.\n\nIf you did not request this, ignore this email.',
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[email],
                 fail_silently=False,
+                html_message=f'''
+                <div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:32px;background:#f8fafc;border-radius:12px;">
+                  <h2 style="color:#1e3a5f;margin-bottom:8px;">Trinetra — Password Reset</h2>
+                  <p style="color:#475569;margin-bottom:24px;">Use the code below to reset your password. It expires in <b>10 minutes</b>.</p>
+                  <div style="background:#0f172a;border-radius:10px;padding:24px;text-align:center;margin-bottom:24px;">
+                    <span style="font-size:36px;font-weight:bold;letter-spacing:12px;color:#3b82f6;font-family:monospace;">{otp_code}</span>
+                  </div>
+                  <p style="color:#94a3b8;font-size:13px;">If you didn't request this, you can safely ignore this email.</p>
+                </div>
+                '''
             )
         except Exception as e:
-            return Response({'error': 'Failed to send email. Please ensure email settings are configured.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response(
+                {'error': f'Failed to send email: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
         return Response({'message': 'If an account exists with this email, an OTP has been sent.'}, status=status.HTTP_200_OK)
 

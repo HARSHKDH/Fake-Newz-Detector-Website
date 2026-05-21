@@ -8,6 +8,8 @@ import Analyzer from './pages/Analyzer'
 import Profile from './pages/Profile'
 import Analytics from './pages/Analytics'
 import ForgotPassword from './pages/ForgotPassword'
+import ShareResult from './pages/ShareResult'
+import ImageAnalyzer from './pages/ImageAnalyzer'
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth()
@@ -40,6 +42,8 @@ function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
           <Route path="/forgot-password" element={<ForgotPassword />} />
+          {/* Public share page — no auth needed */}
+          <Route path="/share" element={<ShareResult />} />
           <Route path="/" element={
             <ProtectedRoute>
               <AppLayout><Dashboard /></AppLayout>
@@ -48,6 +52,11 @@ function App() {
           <Route path="/analyze" element={
             <ProtectedRoute>
               <AppLayout><Analyzer /></AppLayout>
+            </ProtectedRoute>
+          } />
+          <Route path="/analyze/image" element={
+            <ProtectedRoute>
+              <AppLayout><ImageAnalyzer /></AppLayout>
             </ProtectedRoute>
           } />
           <Route path="/analytics" element={

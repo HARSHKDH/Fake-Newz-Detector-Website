@@ -13,7 +13,9 @@ export function AuthProvider({ children }) {
     try {
       const { data } = await api.get('/auth/me/')
       setUser(data)
-    } catch {
+    } catch (err) {
+      // Token is invalid or expired — clear everything immediately
+      // This prevents the refresh interceptor from firing on stale tokens
       localStorage.removeItem('access_token')
       localStorage.removeItem('refresh_token')
       setUser(null)
