@@ -44,3 +44,16 @@ class User(AbstractBaseUser, PermissionsMixin):
     @property
     def display_name(self):
         return self.full_name or self.email.split('@')[0]
+
+
+class OTPVerification(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='otp_verifications')
+    otp_code = models.CharField(max_length=6)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'otp_verifications'
+
+    def __str__(self):
+        return f"{self.user.email} - {self.otp_code}"
+

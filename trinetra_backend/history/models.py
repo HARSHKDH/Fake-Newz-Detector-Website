@@ -11,14 +11,20 @@ class AnalysisHistory(models.Model):
         ('FAKE', 'Fake'),
     ]
 
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='analyses')
-    input_text = models.TextField()
-    input_url = models.URLField(blank=True, null=True)
-    trust_score = models.IntegerField(default=0)  # 0-100
-    verdict = models.CharField(max_length=20, choices=VERDICT_CHOICES)
-    reasoning = models.TextField(blank=True)
+    user            = models.ForeignKey(User, on_delete=models.CASCADE, related_name='analyses')
+    input_text      = models.TextField()
+    input_url       = models.URLField(blank=True, null=True)
+    trust_score     = models.IntegerField(default=0)   # 0-100
+    gemini_score    = models.IntegerField(default=0, null=True, blank=True)
+    verdict         = models.CharField(max_length=20, choices=VERDICT_CHOICES)
+    verdict_label   = models.CharField(max_length=50, blank=True, default='')
+    reasoning       = models.TextField(blank=True)
     source_analysis = models.TextField(blank=True)
-    analyzed_at = models.DateTimeField(auto_now_add=True)
+    red_flags       = models.JSONField(default=list, blank=True)
+    key_claims      = models.JSONField(default=list, blank=True)
+    sources_checked = models.JSONField(default=list, blank=True)
+    input_mode      = models.CharField(max_length=20, blank=True, default='')   # 'claim' | 'article'
+    analyzed_at     = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ['-analyzed_at']

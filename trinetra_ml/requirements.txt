@@ -2,6 +2,6 @@ fastapi
 uvicorn[standard]
 google-generativeai
 httpx
-python-decouple
+python-dotenv
 newspaper3k
 lxml[html_clean]

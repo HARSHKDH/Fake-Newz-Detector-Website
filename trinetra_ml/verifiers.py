@@ -1,21 +1,214 @@
 """
-Trinetra Multi-Source Verifiers
-Parallel verification using HuggingFace, Google Fact Check, NewsAPI, and Reality Defender.
+Trinetra Multi-Source Verifiers v2.0
+Parallel verification: Domain Reputation, HuggingFace, Google Fact Check,
+NewsAPI, and AI-content detection.
 Each verifier returns a dict with a *_score (0-100) and metadata.
 All functions are safe — they never raise; they return neutral results on failure.
 """
 import asyncio
 import re
 import logging
+from urllib.parse import urlparse
 import httpx
-from decouple import config
+from dotenv import load_dotenv
+import os
+
+load_dotenv(override=True)
 
 logger = logging.getLogger(__name__)
 
-HUGGINGFACE_API_KEY       = config('HUGGINGFACE_API_KEY')
-GOOGLE_FACT_CHECK_API_KEY = config('GOOGLE_FACT_CHECK_API_KEY')
-NEWS_API_KEY              = config('NEWS_API_KEY')
-REALITY_DEFENDER_API_KEY  = config('REALITY_DEFENDER_API_KEY')
+HUGGINGFACE_API_KEY       = os.getenv('HUGGINGFACE_API_KEY', '')
+GOOGLE_FACT_CHECK_API_KEY = os.getenv('GOOGLE_FACT_CHECK_API_KEY', '')
+NEWS_API_KEY              = os.getenv('NEWS_API_KEY', '')
+REALITY_DEFENDER_API_KEY  = os.getenv('REALITY_DEFENDER_API_KEY', '')
+SAPLING_API_KEY           = os.getenv('SAPLING_API_KEY', '')
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 0. DOMAIN REPUTATION DATABASE
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Tier 1 — Highly trusted mainstream journalism
+TIER1_TRUSTED = {
+    'bbc.com', 'bbc.co.uk', 'reuters.com', 'apnews.com', 'npr.org',
+    'nytimes.com', 'theguardian.com', 'washingtonpost.com', 'bloomberg.com',
+    'wsj.com', 'economist.com', 'ft.com', 'time.com', 'theatlantic.com',
+    'newyorker.com', 'politico.com', 'axios.com', 'thehill.com',
+    'usatoday.com', 'nbcnews.com', 'cbsnews.com', 'abcnews.go.com',
+    'cnn.com', 'aljazeera.com', 'france24.com', 'dw.com', 'euronews.com',
+    # Indian trusted outlets
+    'thehindu.com', 'ndtv.com', 'hindustantimes.com', 'indianexpress.com',
+    'timesofindia.indiatimes.com', 'theprint.in', 'thewire.in', 'scroll.in',
+    'livemint.com', 'businessstandard.com', 'economictimes.indiatimes.com',
+    'firstpost.com', 'news18.com', 'indiatoday.in',
+    # Science & fact-checking
+    'snopes.com', 'factcheck.org', 'politifact.com', 'fullfact.org',
+    'boomlive.in', 'altnews.in', 'vishvasnews.com', 'newsmobile.in',
+    'sciencemag.org', 'nature.com', 'who.int', 'cdc.gov', 'nih.gov',
+}
+
+# Tier 2 — Reputable but sometimes partisan/opinion-heavy
+TIER2_REPUTABLE = {
+    'vox.com', 'slate.com', 'salon.com', 'huffpost.com', 'buzzfeednews.com',
+    'motherjones.com', 'thenation.com', 'nationalreview.com', 'reason.com',
+    'theintercept.com', 'propublica.org', 'fivethirtyeight.com',
+    'foreignpolicy.com', 'foreignaffairs.com', 'thedailybeast.com',
+    'dailymail.co.uk', 'telegraph.co.uk', 'thesun.co.uk', 'mirror.co.uk',
+    'nypost.com', 'foxnews.com', 'breitbart.com',
+    # Indian Tier 2
+    'opindia.com', 'swarajyamag.com', 'newslaundry.com', 'thequint.com',
+    'wire.in', 'tribuneindia.com', 'deccanherald.com', 'thestatesman.com',
+    'telegraphindia.com', 'theweek.in', 'outlookindia.com', 'frontline.in',
+}
+
+# Known FAKE NEWS / MISINFORMATION / SATIRE sites
+KNOWN_FAKE_SITES = {
+    # International fake news
+    'naturalnews.com', 'infowars.com', 'beforeitsnews.com', 'worldnewsdailyreport.com',
+    'empirenews.net', 'nationalreport.net', 'huzlers.com', 'theonion.com',
+    'babylonbee.com', 'clickhole.com', 'worldpoliticus.com', 'abcnews.com.co',
+    'cbsnews.com.co', 'nbc.com.co', 'usatoday.com.co', 'washingtonpost.com.co',
+    'nytimes.com.co', 'cnn-trending.com', 'cnn.com.de', 'cnnnews24.com',
+    'denverpost.com.co', 'bostontribune.com', 'realfreenews.com',
+    'conservativedailypost.com', 'americannews.com', 'topinfopost.com',
+    'patreontruth.com', 'yournewswire.com', 'newspunch.com', 'wakingtimes.com',
+    'abovetopsecret.com', 'veteranstoday.com', 'globalresearch.ca',
+    'zerohedge.com', 'thetruthseeker.co.uk', 'davidicke.com',
+    'chemtrailsplanet.net', 'geoengineeringwatch.org', 'activistpost.com',
+    'fellowshipofminds.com', 'thedailysheeple.com', 'shtfplan.com',
+    'survivopedia.com', 'whatreallyhappened.com', 'rense.com',
+    'prisonplanet.com', 'politicususa.com', 'addictinginfo.com',
+    'occupydemocrats.com', 'forwardprogressives.com', 'politicalblindspot.com',
+    'realclearpolitics.com', 'rightwingwatch.org', 'rightnationpolitics.com',
+    'freedomoutpost.com', 'redstatewatcher.com', 'teaparty.org',
+    'patriotupdate.com', 'libertynews.com', 'libertydailyreport.com',
+    # Indian fake news / misinformation sites
+    'postcard.news', 'thecircle.co.in', 'newstrend.news', 'khabarfast.com',
+    'viral-news24.com', 'rstv.nic.in', 'pib.gov.in.co', 'pibindia.com',
+    'forwardpress.in',
+    # Fake URL typosquatters
+    'abcnews.go.com.co', 'foxnews.com.co', 'msnbc.com.co',
+}
+
+
+def _extract_domain(url: str) -> str:
+    """Extract clean domain (no www, no subpath) from a URL."""
+    try:
+        parsed = urlparse(url if url.startswith('http') else f'https://{url}')
+        domain = parsed.netloc.lower().replace('www.', '').replace('www2.', '')
+        # Remove port if present
+        domain = domain.split(':')[0]
+        return domain
+    except Exception:
+        return ''
+
+
+async def check_domain_reputation(url: str) -> dict:
+    """Check the reputation of the source domain.
+
+    Returns a trust score based on domain reputation:
+    - Known trusted outlets → high score (85-95)
+    - Reputable but partisan outlets → moderate score (60-75)
+    - Unknown/neutral domains → 50 (excluded from composite)
+    - Known fake-news/misinformation sites → very low score (5-15) + hard flag
+    """
+    if not url or not url.strip():
+        return {
+            'domain_available': False,
+            'domain_score': None,
+            'domain_reputation': 'No URL provided',
+            'domain_category': 'text_only',
+            'is_known_fake_site': False,
+        }
+
+    domain = _extract_domain(url)
+    if not domain:
+        return {
+            'domain_available': False,
+            'domain_score': None,
+            'domain_reputation': 'Could not parse domain',
+            'domain_category': 'unknown',
+            'is_known_fake_site': False,
+        }
+
+    # Check for exact match first, then parent domain
+    def _match(domain_set: set, d: str) -> bool:
+        if d in domain_set:
+            return True
+        # Check parent domain (e.g. 'sports.ndtv.com' → 'ndtv.com')
+        parts = d.split('.')
+        for i in range(1, len(parts) - 1):
+            parent = '.'.join(parts[i:])
+            if parent in domain_set:
+                return True
+        return False
+
+    if _match(KNOWN_FAKE_SITES, domain):
+        return {
+            'domain_available': True,
+            'domain_score': 8,
+            'domain_reputation': f'⚠️ KNOWN MISINFORMATION SITE: {domain}',
+            'domain_category': 'known_fake',
+            'is_known_fake_site': True,
+            'domain': domain,
+        }
+
+    if _match(TIER1_TRUSTED, domain):
+        return {
+            'domain_available': True,
+            'domain_score': 92,
+            'domain_reputation': f'✅ Verified Trusted Outlet: {domain}',
+            'domain_category': 'tier1_trusted',
+            'is_known_fake_site': False,
+            'domain': domain,
+        }
+
+    if _match(TIER2_REPUTABLE, domain):
+        return {
+            'domain_available': True,
+            'domain_score': 68,
+            'domain_reputation': f'🔵 Reputable Outlet (may be partisan): {domain}',
+            'domain_category': 'tier2_reputable',
+            'is_known_fake_site': False,
+            'domain': domain,
+        }
+
+    # Unknown domain — check basic signals (HTTPS, no IP address, .gov/.edu)
+    is_gov_edu = domain.endswith('.gov') or domain.endswith('.edu') or domain.endswith('.ac.in') or domain.endswith('.ac.uk')
+    has_ip     = bool(re.match(r'^\d+\.\d+\.\d+\.\d+$', domain))
+
+    if is_gov_edu:
+        return {
+            'domain_available': True,
+            'domain_score': 82,
+            'domain_reputation': f'✅ Official Government/Education source: {domain}',
+            'domain_category': 'official',
+            'is_known_fake_site': False,
+            'domain': domain,
+        }
+
+    if has_ip:
+        return {
+            'domain_available': True,
+            'domain_score': 15,
+            'domain_reputation': f'⚠️ IP address URL — highly suspicious: {domain}',
+            'domain_category': 'suspicious_ip',
+            'is_known_fake_site': False,
+            'domain': domain,
+        }
+
+    # Truly unknown domain — return as unavailable so composite excludes it
+    return {
+        'domain_available': False,  # Exclude neutral unknowns from composite
+        'domain_score': None,
+        'domain_reputation': f'Unknown domain: {domain}',
+        'domain_category': 'unknown',
+        'is_known_fake_site': False,
+        'domain': domain,
+    }
+
+
+
 
 # HuggingFace — use the small bert-tiny fake-news model (fast, free, reliable)
 # mrm8488/bert-tiny-finetuned-fake-news-detection: binary FAKE/REAL classifier
@@ -122,7 +315,9 @@ async def check_huggingface(text: str) -> dict:
     if data2 is not None:
         items2 = data2[0] if isinstance(data2, list) and isinstance(data2[0], list) else data2
         if isinstance(items2, list) and items2 and isinstance(items2[0], dict):
-            lbl_map = {'positive': 80, 'neutral': 50, 'negative': 25}
+            # Finbert maps: positive=credible style, neutral=50, negative=suspicious
+            # BUT well-written fake news often has positive/neutral tone, so cap at 60.
+            lbl_map = {'positive': 60, 'neutral': 50, 'negative': 25}
             best2 = max(items2, key=lambda x: x.get('score', 0))
             lbl2 = best2.get('label', 'neutral').lower()
             trust2 = lbl_map.get(lbl2, 50)
@@ -135,7 +330,7 @@ async def check_huggingface(text: str) -> dict:
                 'hf_note':      'Used sentiment fallback model',
             }
 
-    return {'hf_score': 50, 'hf_label': 'UNKNOWN', 'hf_available': False,
+    return {'hf_score': None, 'hf_label': 'UNKNOWN', 'hf_available': False,
             'hf_error': f'Both HuggingFace models unavailable (primary HTTP {status}, fallback HTTP {status2})'}
 
 
@@ -279,9 +474,11 @@ async def check_google_fact_check(text: str) -> dict:
 
             if not claims:
                 return {
-                    'fact_checks': [], 'fact_check_score': 50,
-                    'fact_check_available': True, 'fact_check_count': 0,
-                    'fact_check_source': 'Google Fact Check',
+                    'fact_checks':          [],
+                    'fact_check_score':     50,
+                    'fact_check_available': True,   # API worked — just no matching claims
+                    'fact_check_count':     0,
+                    'fact_check_source':    'Google Fact Check',
                 }
 
             parsed, pos, neg = _parse_google_fc_claims(claims)
@@ -354,12 +551,15 @@ async def check_news_api(text: str) -> dict:
             if any(ts in s['name'].lower() for ts in TRUSTED_SOURCES)
         )
 
-        if total_results == 0:          news_score = 25
-        elif trusted_count >= 3:        news_score = 90
-        elif trusted_count == 2:        news_score = 78
-        elif trusted_count == 1:        news_score = 65
-        elif total_results >= 5:        news_score = 55
-        else:                           news_score = 40
+        # NewsAPI matches on keywords — NOT on whether the claim is true.
+        # A fake article about a real topic will still get keyword hits.
+        # So keep scores conservative: only 3+ trusted sources push above 60.
+        if total_results == 0:          news_score = 25  # no coverage at all → suspicious
+        elif trusted_count >= 3:        news_score = 80  # strong corroboration
+        elif trusted_count == 2:        news_score = 65  # moderate corroboration
+        elif trusted_count == 1:        news_score = 52  # weak corroboration (keyword match only)
+        elif total_results >= 5:        news_score = 45  # some coverage, no trusted sources
+        else:                           news_score = 35  # minimal coverage
 
         return {
             'news_sources': sources,
@@ -371,7 +571,7 @@ async def check_news_api(text: str) -> dict:
 
     except Exception as e:
         return {
-            'news_sources': [], 'news_score': 50,
+            'news_sources': [], 'news_score': None,
             'news_available': False, 'news_error': str(e),
         }
 
@@ -381,7 +581,7 @@ async def check_news_api(text: str) -> dict:
 #    Primary:  Sapling AI  (https://sapling.ai — free key, sign up, no credit card)
 #    Fallback: Built-in heuristic analyser (always works, no API needed)
 # ─────────────────────────────────────────────────────────────────────────────
-SAPLING_API_KEY = config('SAPLING_API_KEY', default='')
+# SAPLING_API_KEY is loaded at the top
 
 # ── Built-in heuristic for AI-generated text ──────────────────────────────────
 # Scores how "AI-like" the text looks based on linguistic patterns.

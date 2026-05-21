@@ -12,6 +12,10 @@
     "trinetra_frontend",
     "**/__pycache__"
   ],
+  "extraPaths": [
+    "trinetra_ml",
+    "trinetra_backend"
+  ],
   "reportMissingImports": "warning",
   "reportMissingModuleSource": "none",
   "reportOperatorIssue": "none",

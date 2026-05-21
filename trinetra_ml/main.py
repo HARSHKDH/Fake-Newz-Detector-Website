@@ -8,7 +8,16 @@ from typing import Optional, List
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from analyzer import analyze_content
+import os
+import sys
+
+# Ensure the parent directory is on sys.path so absolute imports work
+_ML_DIR = os.path.dirname(os.path.abspath(__file__))
+_ROOT_DIR = os.path.dirname(_ML_DIR)
+if _ROOT_DIR not in sys.path:
+    sys.path.insert(0, _ROOT_DIR)
+
+from trinetra_ml.analyzer import analyze_content
 
 app = FastAPI(
     title="Trinetra AI – Verification Engine",
@@ -84,6 +93,7 @@ class AnalyzeResponse(BaseModel):
     rd_ai_probability: Optional[int]  = None
     # Meta
     sources_checked: Optional[List[str]] = []
+    input_mode:      Optional[str]       = None   # 'claim' | 'article'
 
     model_config = {'extra': 'allow'}  # tolerate future extra keys
 

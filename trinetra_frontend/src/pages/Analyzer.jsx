@@ -26,15 +26,24 @@ export default function Analyzer() {
       const { data } = await mlApi.post('/analyze', payload)
       setResult(data)
 
-      // Save to history
+      // Save to history (non-critical — failure is silent)
       try {
+        const inputText = mode === 'text'
+          ? text.slice(0, 500)
+          : `[URL] ${url}`
         await api.post('/history/', {
-          input_text: mode === 'text' ? text : `[URL] ${url}`,
-          input_url: mode === 'url' ? url : null,
-          trust_score: data.trust_score,
-          verdict: data.verdict,
-          reasoning: data.reasoning,
-          source_analysis: data.source_analysis,
+          input_text:      inputText,
+          input_url:       mode === 'url' ? url : '',
+          trust_score:     data.trust_score,
+          gemini_score:    data.gemini_score    || 0,
+          verdict:         data.verdict,
+          verdict_label:   data.verdict_label   || '',
+          reasoning:       data.reasoning       || '',
+          source_analysis: data.source_analysis || '',
+          red_flags:       Array.isArray(data.red_flags)       ? data.red_flags.filter(Boolean).slice(0, 8)        : [],
+          key_claims:      Array.isArray(data.key_claims)      ? data.key_claims.filter(Boolean).slice(0, 8)       : [],
+          sources_checked: Array.isArray(data.sources_checked) ? data.sources_checked.filter(Boolean).slice(0, 20) : [],
+          input_mode:      data.input_mode || '',
         })
       } catch (_) {
         // Non-critical — history save failure is silent

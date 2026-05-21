@@ -1,5 +1,5 @@
 import { Link, useNavigate, useLocation } from 'react-router-dom'
-import { Shield, Newspaper, Scan, User, LogOut, Menu, X, ChevronDown } from 'lucide-react'
+import { Shield, Newspaper, Scan, User, LogOut, Menu, X, ChevronDown, BarChart2 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useState } from 'react'
 
@@ -20,6 +20,7 @@ export default function Navbar() {
   const navItems = [
     { path: '/', label: 'News Feed', icon: Newspaper },
     { path: '/analyze', label: 'Trinetra AI', icon: Scan },
+    { path: '/analytics', label: 'Analytics', icon: BarChart2 },
   ]
 
   return (

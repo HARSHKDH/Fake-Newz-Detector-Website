@@ -209,3 +209,8 @@ trinetra_frontend/node_modules/
  .vscode/
  .\.vscode\ 
   .vscode/settings.json
+node_modules/
+package-lock.json
+test_server.py
+trinetra_ml/test_gemini.py
+.vscode/
