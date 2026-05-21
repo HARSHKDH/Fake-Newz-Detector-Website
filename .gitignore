@@ -214,3 +214,5 @@ package-lock.json
 test_server.py
 trinetra_ml/test_gemini.py
 .vscode/
+
+trinetra_ml/test_verifiers.py
