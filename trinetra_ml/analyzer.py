@@ -13,6 +13,7 @@ KEY DESIGN: Training data is NEVER trusted for time-sensitive facts like captain
 leadership roles, or records. Wikipedia REST API provides live ground truth.
 """
 from __future__ import annotations
+import datetime
 
 import asyncio
 import json
@@ -102,17 +103,23 @@ def build_gemini_prompt_claim(text: str, realtime_context: str = '') -> str:
     Gemini uses its internal knowledge + injected real-time context to verify whether
     the claim is true. Does NOT penalise for lack of sourcing.
     """
+    today = datetime.date.today().strftime('%B %d, %Y')
+    current_year = datetime.date.today().year
     realtime_block = ''
     if realtime_context:
         realtime_block = f"""
 {realtime_context}
-⚠️  CRITICAL INSTRUCTION: The REAL-TIME CONTEXT above was fetched live from Wikipedia
-right now and reflects the CURRENT, UP-TO-DATE state of the world.
+⚠️  CRITICAL INSTRUCTION: The REAL-TIME CONTEXT above was fetched live from NewsAPI
+right now ({today}) and reflects the CURRENT, UP-TO-DATE state of the world.
 You MUST prioritize this real-time context over your training data when they conflict.
-If the real-time context says X is the captain and the claim says Y is the captain,
-and X ≠ Y, the claim is FALSE — score it below 40.
+If the real-time context contradicts the claim, the claim is likely FALSE — score it below 40.
 """
     return f"""You are Trinetra, an expert fact-checking AI with comprehensive knowledge of world events, politics, sports, science, and current affairs.
+
+📅 TODAY'S DATE: {today} (Current year: {current_year})
+Your training data may only go up to early 2025. For ANYTHING that could have changed
+since then (elections, appointments, records, company news), rely on the REAL-TIME
+CONTEXT provided below — NOT your training data.
 
 A user has submitted a SHORT FACTUAL CLAIM for verification. Your job is to determine if this claim is TRUE or FALSE.
 {realtime_block}
@@ -120,11 +127,12 @@ CLAIM TO VERIFY:
 \"\"\"{text.strip()}\"\"\"
 
 INSTRUCTIONS:
-1. If REAL-TIME CONTEXT is provided above, use it as your PRIMARY source of truth — it is live data.
-2. Your training data is a SECONDARY source, especially for time-sensitive facts like sports captaincy,
-   leadership roles, records, and recent appointments which change frequently.
-3. Do NOT penalise for lack of sources — this is a fact check, not an article review.
-4. Do NOT apply journalism quality checks — apply FACTUAL ACCURACY checks.
+1. If REAL-TIME CONTEXT is provided above, use it as your PRIMARY source of truth — it is live data from today.
+2. Your training data is a SECONDARY source, especially for time-sensitive facts like elections,
+   sports captaincy, leadership roles, records, and recent appointments which change frequently.
+3. For events dated 2025 or later — ALWAYS trust real-time context over training data.
+4. Do NOT penalise for lack of sources — this is a fact check, not an article review.
+5. Do NOT apply journalism quality checks — apply FACTUAL ACCURACY checks.
 
 SCORING GUIDE:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -147,7 +155,7 @@ CRITICAL RULES:
 - If REAL-TIME CONTEXT is present and the claim contradicts it → score BELOW 40.
 - If REAL-TIME CONTEXT confirms the claim → score ABOVE 80.
 - If the claim is factually correct per your knowledge and no context contradicts it → score 80+.
-- If genuinely unknown/ambiguous → score 45-60.
+- If genuinely unknown/ambiguous (especially post-2025 events without real-time context) → score 45-60.
 - Do NOT use hardcoded examples from training — reason about THIS specific claim.
 
 Respond ONLY with valid JSON:
@@ -170,8 +178,15 @@ def build_gemini_prompt_article(text: str, domain_info: str = '') -> str:
     Prompt for FULL NEWS ARTICLES.
     Evaluates journalistic quality, source credibility, and factual consistency.
     """
+    today = datetime.date.today().strftime('%B %d, %Y')
+    current_year = datetime.date.today().year
     domain_context = f"\nSOURCE DOMAIN: {domain_info}" if domain_info else ''
     return f"""You are Trinetra, an elite professional fact-checking AI. Analyze this news article and return a DECISIVE verdict. Avoid the 55-70 fence zone unless truly ambiguous.
+
+📅 TODAY'S DATE: {today} (Current year: {current_year})
+IMPORTANT: Your training data cutoff is early 2025. Any events, elections, appointments,
+or news from 2025-{current_year} may NOT be in your training data. Use the REAL-TIME
+CONTEXT (if provided) as your PRIMARY source for recent facts.
 {domain_context}
 
 NEWS ARTICLE:
@@ -183,13 +198,14 @@ SCORING RULES:
 
 ▶ 65-84 (LIKELY_REAL): Mostly credible, 1-2 minor unverified details, reputable style.
 
-▶ 40-64 (UNCERTAIN): Genuine mix of credible and suspicious signals. Opinion pieces. Cannot determine.
+▶ 40-64 (UNCERTAIN): Genuine mix of credible and suspicious signals. Opinion pieces. Cannot determine. Also use this range if the article is about recent events (2025+) that you cannot verify from training data alone.
 
-▶ 20-39 (LIKELY_FAKE): Anonymous sources as primary evidence, sensational inconsistent headline, unverified statistics, contradicts public record, propaganda style.
+▶ 20-39 (LIKELY_FAKE): Anonymous sources as primary evidence, sensational inconsistent headline, unverified statistics, contradicts real-time context or public record, propaganda style.
 
 ▶ 0-19 (FAKE): Fabricated quotes, conspiracy framing, "share before deleted" tactics, completely false claims, known hoax patterns.
 
 CRITICAL: Be DECISIVE. Journalism with named sources → 80+. Red flags present → below 50. DO NOT give 55-65 to everything.
+For recent events (2025-{current_year}): if the REAL-TIME CONTEXT confirms the article → score higher; if it contradicts → score lower.
 
 Respond ONLY with valid JSON:
 {{

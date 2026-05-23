@@ -395,7 +395,13 @@ async def _gemini_factcheck_fallback(text: str) -> dict:
     try:
         genai.configure(api_key=gemini_key)
         model = genai.GenerativeModel('gemini-2.0-flash-lite')
-        prompt = f"""Extract up to 3 specific verifiable factual claims from the text below, and rate each as TRUE, FALSE, or UNCERTAIN based on your knowledge.
+        import datetime as _dt
+        _today = _dt.date.today().strftime('%B %d, %Y')
+        _year  = _dt.date.today().year
+        prompt = f"""You are a fact-checking AI. Today's date is {_today} (year: {_year}).
+Your training data may only go up to early 2025. For events in 2025-{_year}, be cautious and mark as UNCERTAIN if you cannot confirm from your training data.
+
+Extract up to 3 specific verifiable factual claims from the text below, and rate each as TRUE, FALSE, or UNCERTAIN based on your knowledge.
 
 Text: \"\"\"{text[:800]}\"\"\"
 
@@ -547,12 +553,15 @@ async def check_news_api(text: str) -> dict:
         keywords = [w for w in words if w.lower() not in STOP_WORDS and len(w) > 3][:8]
         query = ' '.join(keywords) or text[:100]
 
+        import datetime as _dt
+        _from_date = (_dt.date.today() - _dt.timedelta(days=30)).isoformat()  # last 30 days
         params = {
             'q': query,
             'apiKey': NEWS_API_KEY,
             'pageSize': 10,
-            'sortBy': 'relevancy',
+            'sortBy': 'publishedAt',   # most recent first
             'language': 'en',
+            'from': _from_date,        # only articles from the last 30 days
         }
 
         async with httpx.AsyncClient(timeout=12) as client:
