@@ -55,12 +55,60 @@ class NewsListView(APIView):
 
         try:
             resp = requests.get(endpoint, params=params, timeout=10)
-            resp.raise_for_status()
-            data = resp.json()
         except requests.exceptions.Timeout:
-            return Response({'error': 'News API timed out. Please try again.'}, status=status.HTTP_504_GATEWAY_TIMEOUT)
+            return Response(
+                {'error': 'News service timed out. Please try again in a moment.'},
+                status=status.HTTP_504_GATEWAY_TIMEOUT,
+            )
+        except requests.exceptions.ConnectionError:
+            return Response(
+                {'error': 'Cannot reach the news service. Check your internet connection.'},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
         except requests.exceptions.RequestException as e:
-            return Response({'error': f'Failed to fetch news: {str(e)}'}, status=status.HTTP_502_BAD_GATEWAY)
+            return Response(
+                {'error': f'News service unavailable: {str(e)}'},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        # Surface GNews API errors with actionable messages
+        if resp.status_code == 401:
+            return Response(
+                {'error': 'GNews API key is invalid or missing. Check trinetra_backend/.env'},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        if resp.status_code == 403:
+            return Response(
+                {'error': 'GNews API access forbidden. Verify your API key permissions.'},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        if resp.status_code == 429:
+            return Response(
+                {
+                    'error': 'GNews free-tier quota exceeded for today.',
+                    'message': 'The GNews API free plan allows 100 requests/day. Quota resets at midnight UTC. '
+                               'You can upgrade at https://gnews.io/pricing or add a new key to trinetra_backend/.env',
+                },
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
+        if resp.status_code >= 500:
+            return Response(
+                {'error': f'GNews service is currently down (HTTP {resp.status_code}). Please try again later.'},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+        if not resp.ok:
+            return Response(
+                {'error': f'GNews returned an unexpected error (HTTP {resp.status_code}).'},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        try:
+            data = resp.json()
+        except ValueError:
+            return Response(
+                {'error': 'GNews returned an invalid response. Please try again.'},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
 
         articles = data.get('articles', [])
         cleaned = []

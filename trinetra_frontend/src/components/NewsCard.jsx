@@ -1,4 +1,4 @@
-import { ExternalLink, Clock, Shield, ChevronRight } from 'lucide-react'
+import { Clock, Shield, ChevronRight, Newspaper } from 'lucide-react'
 
 function timeAgo(dateString) {
   const now = new Date()
@@ -10,20 +10,50 @@ function timeAgo(dateString) {
   return `${Math.floor(diff / 86400)}d ago`
 }
 
+/**
+ * Route external images through weserv.nl — a free, CORS-safe image proxy.
+ * This prevents ERR_NAME_NOT_RESOLVED and cross-origin failures for
+ * external news thumbnail URLs that may be behind strict same-origin policies.
+ */
+function proxyImage(rawUrl) {
+  if (!rawUrl) return null
+  try {
+    // Already a data URI or relative path — use as-is
+    if (rawUrl.startsWith('data:') || rawUrl.startsWith('/')) return rawUrl
+    const encoded = encodeURIComponent(rawUrl.replace(/^https?:\/\//, ''))
+    return `https://images.weserv.nl/?url=${encoded}&w=600&q=80&output=webp&default=placeholder`
+  } catch {
+    return rawUrl
+  }
+}
+
 export default function NewsCard({ article }) {
   const { title, description, image, url, published_at, source } = article
+  const proxiedImage = proxyImage(image)
 
   return (
     <article className="card group flex flex-col hover:-translate-y-1 hover:shadow-card-hover transition-all duration-300 animate-fade-in">
       {/* Image */}
-      {image ? (
-        <div className="relative h-48 overflow-hidden">
+      {proxiedImage ? (
+        <div className="relative h-48 overflow-hidden bg-slate-100">
           <img
-            src={image}
+            src={proxiedImage}
             alt={title}
             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-            onError={(e) => { e.target.style.display = 'none' }}
+            onError={(e) => {
+              // Hide the broken img and show the placeholder sibling
+              e.target.style.display = 'none'
+              const placeholder = e.target.nextElementSibling
+              if (placeholder) placeholder.style.display = 'flex'
+            }}
           />
+          {/* Fallback placeholder — hidden until img errors */}
+          <div
+            className="absolute inset-0 bg-gradient-to-br from-slate-200 to-slate-300 items-center justify-center"
+            style={{ display: 'none' }}
+          >
+            <Newspaper className="w-10 h-10 text-slate-400" />
+          </div>
           <div className="absolute inset-0 bg-gradient-to-t from-black/30 to-transparent" />
           <div className="absolute top-3 left-3">
             <div className="flex items-center gap-1.5 bg-navy-900/80 backdrop-blur-sm px-2.5 py-1 rounded-lg">

@@ -39,13 +39,22 @@ export default function Dashboard() {
       const { data } = await api.get(`/news/?category=${category}`)
       setArticles(data.articles || [])
     } catch (err) {
-      const msg = err.response?.data?.message || err.response?.data?.error
-      if (err.response?.status === 503) {
+      const serverMsg = err.response?.data?.message || err.response?.data?.error
+      const httpStatus = err.response?.status
+
+      if (httpStatus === 503) {
         setError('GNews API key not configured. Add your key to trinetra_backend/.env to load live news.')
+      } else if (httpStatus === 429) {
+        setError(
+          serverMsg ||
+          'GNews free-tier quota exceeded (100 requests/day). News will be available again after midnight UTC.'
+        )
+      } else if (httpStatus === 502 || httpStatus === 504) {
+        setError(serverMsg || 'News service is temporarily unavailable. Please try again shortly.')
       } else if (!err.response) {
         setError('Cannot reach backend. Make sure Django is running on port 8000.')
       } else {
-        setError(msg || 'Failed to load news. Please try again.')
+        setError(serverMsg || 'Failed to load news. Please try again.')
       }
     } finally {
       setLoading(false)
